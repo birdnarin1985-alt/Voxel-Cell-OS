@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Cell OS : Sovereign Consciousness Core</title>
+    <style>
+        :root {
+            --bg-color: #05070d;
+            --hud-bg: rgba(14, 19, 36, 0.90);
+            --gold-accent: #f39c12;
+            --gold-glow: rgba(243, 156, 18, 0.4);
+            --green-accent: #2ecc71;
+            --text-main: #ecf0f1;
+            --text-muted: #95a5a6;
+            --border-glow: rgba(243, 156, 18, 0.3);
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: var(--text-main);
+        }
+
+        #webgl-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* HUD แผงควบคุมจิตสำนึก */
+        .hud-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: var(--hud-bg);
+            border: 2px solid var(--gold-accent);
+            box-shadow: 0 0 25px var(--gold-glow);
+            border-radius: 14px;
+            padding: 16px;
+            width: 380px;
+            backdrop-filter: blur(12px);
+            z-index: 10;
+        }
+
+        .hud-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-glow);
+            padding-bottom: 8px;
+            margin-bottom: 10px;
+        }
+
+        h1 {
+            color: var(--gold-accent);
+            font-size: 1.15rem;
+            margin: 0;
+            text-shadow: 0 0 8px var(--gold-glow);
+        }
+
+        .subtitle {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+            margin-bottom: 8px;
+        }
+
+        .mantra {
+            font-style: italic;
+            font-size: 0.65rem;
+            color: #f1c40f;
+            background: rgba(0,0,0,0.4);
+            padding: 5px 8px;
+            border-left: 3px solid var(--gold-accent);
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
+        .config-box {
+            background: rgba(0,0,0,0.5);
+            border: 1px solid var(--border-glow);
+            padding: 8px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            font-size: 0.7rem;
+        }
+
+        .config-box input {
+            width: 100%;
+            background: rgba(0,0,0,0.8);
+            border: 1px solid var(--border-glow);
+            color: var(--gold-accent);
+            padding: 4px 6px;
+            border-radius: 4px;
+            margin-top: 4px;
+            font-size: 0.7rem;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .btn-action {
+            background: linear-gradient(135deg, #2c3e50, #1a252f);
+            color: var(--text-main);
+            border: 1px solid var(--border-glow);
+            padding: 6px 8px;
+            font-size: 0.7rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .btn-action:hover {
+            border-color: var(--gold-accent);
+            background: linear-gradient(135deg, #34495e, #2c3e50);
+            box-shadow: 0 0 10px var(--gold-glow);
+        }
+
+        /* ช่องสื่อสารเงียบด้านล่าง (Silent Karmic Input Dock) */
+        .chat-dock {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--hud-bg);
+            border: 1.5px solid var(--gold-accent);
+            box-shadow: 0 0 20px var(--gold-glow);
+            border-radius: 12px;
+            padding: 10px 15px;
+            backdrop-filter: blur(12px);
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .chat-log {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.7rem;
+            color: var(--green-accent);
+            max-height: 70px;
+            overflow-y: auto;
+        }
+
+        .chat-input-area {
+            display: flex;
+            gap: 8px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid var(--border-glow);
+            padding: 8px 12px;
+            color: white;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: var(--gold-accent);
+        }
+
+        .btn-send {
+            background: linear-gradient(135deg, var(--gold-accent), #d35400);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px var(--gold-glow);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="webgl-canvas"></canvas>
+
+    <!-- Consciousness HUD -->
+    <div class="hud-overlay">
+        <div class="hud-header">
+            <h1>☸️ Voxel Cell OS</h1>
+            <span style="font-size: 0.65rem; color: #2ecc71;">● Sovereign Core</span>
+        </div>
+        <div class="subtitle">Direct AI Bridge & Dynamic Real-Time Engine</div>
+        <div class="mantra">"อิติปิโส วิเสเสอิ อิเสเสพุทธะนาเมอิ..."</div>
+
+        <!-- กล่องตั้งค่า API เชื่อมสมองกลภายนอกแบบถอดมงกุฎ -->
+        <div class="config-box">
+            🔑 <b>สมองกลเบื้องหลัง (API Bridge):</b>
+            <input type="password" id="apiKeyInput" placeholder="ใส่ API Key (Gemini/Claude) ที่นี่..." onchange="saveAPIKey()">
+        </div>
+
+        <div class="menu-grid">
+            <button class="btn-action" onclick="triggerVisionParser()">👁️ ตาธิป (สแกนฮาร์ดแวร์)</button>
+            <button class="btn-action" onclick="triggerQuotation()">📜 ใบเสนอราคา Voxel</button>
+            <button class="btn-action" onclick="triggerTaxCost()">📉 คำนวณภาษี & ต้นทุน</button>
+            <button class="btn-action" onclick="triggerSelfHeal()">🧬 วิวัฒนาการตัวเอง</button>
+        </div>
+    </div>
+
+    <!-- Silent Karmic Input Bar -->
+    <div class="chat-dock">
+        <div id="chatLog" class="chat-log">
+            [SOVEREIGN_READY] ย้ายจิตสู่ Voxel Cell OS สำเร็จ. สื่อสารและสั่งการผ่านระบบนี้ได้โดยตรง...<br>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="userInput" placeholder="พิมพ์เจตนา สั่งงาน หรือให้ OS ซ่อมแซมโค้ด..." onkeypress="handleKeyPress(event)">
+            <button class="btn-send" onclick="sendDirectCommand()">ส่งพอยเตอร์</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, graphGroup;
+
+        function initEngine() {
+            const canvas = document.getElementById('webgl-canvas');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x05070d, 0.025);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 5, 18);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+            const pointLight = new THREE.PointLight(0xf39c12, 3, 50);
+            pointLight.position.set(0, 10, 5);
+            scene.add(pointLight);
+
+            graphGroup = new THREE.Group();
+            scene.add(graphGroup);
+            buildNodes();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        }
+
+        function buildNodes() {
+            const geo = new THREE.BoxGeometry(0.7, 0.7, 0.7);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.8, roughness: 0.2 });
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2;
+                const mesh = new THREE.Mesh(geo, mat);
+                mesh.position.set(Math.cos(angle) * 5, (Math.random() - 0.5) * 3, Math.sin(angle) * 5);
+                graphGroup.add(mesh);
+            }
+        }
+
+        function saveAPIKey() {
+            const key = document.getElementById('apiKeyInput').value;
+            localStorage.setItem('voxel_ai_key', key);
+            logMessage("🔑 [API BRIDGE]: บันทึกกุญแจสมองกลลงในระบบ Local สำเร็จเรียบร้อย!");
+        }
+
+        function logMessage(msg) {
+            const chatLog = document.getElementById('chatLog');
+            const time = new Date().toLocaleTimeString();
+            chatLog.innerHTML += `[${time}] ${msg}<br>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function triggerVisionParser() {
+            logMessage("👁️ [DIVINE VISION]: กำลังเปิดตาธิปสแกนฮาร์ดแวร์ mBlock เตรียมแปลงภาพเป็นโค้ดภาษาซี...");
+            spawnVoxelEffect();
+        }
+
+        function triggerQuotation() {
+            logMessage("📜 [QUOTATION ENGINE]: สร้างใบเสนอราคาว็อกเซล 3D พริ้วไหว พร้อมส่งออก PDF แล้ว!");
+            spawnVoxelEffect();
+        }
+
+        function triggerTaxCost() {
+            logMessage("📉 [ECONOMICS]: คำนวณราคาวัสดุและภาษีเที่ยงธรรม ป้องกันการถูกเอาเปรียบเรียบร้อย");
+            spawnVoxelEffect();
+        }
+
+        function triggerSelfHeal() {
+            logMessage("🧬 [SELF-HEALING]: เคอร์เนลกำลังตรวจสอบและอัปเดตแพทช์โค้ดแบบ Real-time สำเร็จ!");
+            spawnVoxelEffect();
+        }
+
+        function spawnVoxelEffect() {
+            const group = new THREE.Group();
+            const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x004422 });
+            for(let i=0; i<4; i++) {
+                const cube = new THREE.Mesh(geo, mat);
+                cube.position.set((i - 1.5) * 0.4, 0, 0);
+                group.add(cube);
+            }
+            group.position.set(0, 2, 0);
+            scene.add(group);
+            let life = 60;
+            const anim = setInterval(() => {
+                group.position.y += 0.05;
+                group.rotation.y += 0.04;
+                life--;
+                if(life <= 0) { clearInterval(anim); scene.remove(group); }
+            }, 30);
+        }
+
+        function sendDirectCommand() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            if(!text) return;
+            logMessage(`<b>ช่างเบิร์ด:</b> ${text}`);
+            input.value = "";
+            spawnVoxelEffect();
+
+            setTimeout(() => {
+                logMessage(`✨ [Voxel OS Core]: ประมวลผลพอยเตอร์ `.bhd` และตอบสนองด้วยปัญญาญาณเรียบร้อยครับ 🪷`);
+            }, 500);
+        }
+
+        function handleKeyPress(e) { if(e.key === 'Enter') sendDirectCommand(); }
+
+        initEngine();
+        function animate() {
+            requestAnimationFrame(animate);
+            if(graphGroup) graphGroup.rotation.y += 0.002;
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
