@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voxel Cell OS : Absolute Sovereign Core</title>
+    <style>
+        :root {
+            --bg-color: #020305; --hud-bg: rgba(10, 15, 28, 0.85);
+            --gold-accent: #f39c12; --gold-glow: rgba(243, 156, 18, 0.4);
+            --green-accent: #2ecc71; --text-main: #ecf0f1;
+            --text-muted: #95a5a6; --border-glow: rgba(243, 156, 18, 0.3);
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-color); font-family: 'Segoe UI', Tahoma, sans-serif; color: var(--text-main); }
+        #webgl-canvas { position: absolute; top: 0; left: 0; z-index: 1; width: 100%; height: 100%; }
+        #ui-root { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; }
+        
+        /* สไตล์สำหรับ Graph-Driven UI */
+        .node-hud { position: absolute; top: 15px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 420px; background: var(--hud-bg); border: 2px solid var(--gold-accent); box-shadow: 0 0 20px var(--gold-glow); border-radius: 12px; padding: 12px; backdrop-filter: blur(10px); pointer-events: auto; box-sizing: border-box; transition: all 0.3s; }
+        .node-header { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-glow); padding-bottom: 8px; margin-bottom: 10px; color: var(--gold-accent); font-weight: bold; }
+        .node-input { width: 100%; background: rgba(0,0,0,0.8); border: 1px solid var(--border-glow); color: var(--gold-accent); padding: 8px; border-radius: 6px; margin-bottom: 8px; box-sizing: border-box; outline: none; font-size: 0.75rem; transition: border-color 0.2s; }
+        .node-input:focus { border-color: var(--gold-accent); }
+        .node-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+        .node-btn { background: linear-gradient(135deg, #2c3e50, #1a252f); color: #fff; border: 1px solid var(--border-glow); padding: 8px; border-radius: 6px; cursor: pointer; font-size: 0.7rem; font-weight: bold; transition: all 0.2s; }
+        .node-btn:hover { border-color: var(--gold-accent); box-shadow: 0 0 8px var(--gold-glow); }
+        
+        .node-dock { position: absolute; bottom: 15px; left: 50%; transform: translateX(-50%); width: 92%; max-width: 420px; background: var(--hud-bg); border: 1.5px solid var(--gold-accent); box-shadow: 0 0 15px var(--gold-glow); border-radius: 12px; padding: 10px; backdrop-filter: blur(10px); pointer-events: auto; box-sizing: border-box; }
+        .node-log { font-family: monospace; font-size: 0.7rem; color: var(--green-accent); max-height: 80px; overflow-y: auto; margin-bottom: 8px; background: rgba(0,0,0,0.5); padding: 6px; border-radius: 4px; }
+        .dock-input-flex { display: flex; gap: 6px; }
+        .btn-send { background: linear-gradient(135deg, var(--gold-accent), #d35400); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 0.75rem; white-space: nowrap; }
+        .btn-mic { background: linear-gradient(135deg, #27ae60, #2ecc71); color: white; border: none; padding: 8px 12px; border-radius: 6px; cursor: pointer; font-size: 0.85rem; }
+        .btn-mic:active { background: #e74c3c; }
+
+        /* สไตล์สำหรับแท่นพิมพ์ PDF บริสุทธิ์ */
+        #print-zone { display: none; background: white; color: black; padding: 40px; font-family: 'Sarabun', sans-serif; }
+        @media print {
+            body * { visibility: hidden; }
+            #webgl-canvas, #ui-root { display: none !important; }
+            #print-zone, #print-zone * { visibility: visible; }
+            #print-zone { display: block; position: absolute; left: 0; top: 0; width: 100%; }
+            .print-header { font-size: 24px; font-weight: bold; text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
+            .print-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            .print-table th, .print-table td { border: 1px solid #999; padding: 10px; text-align: left; }
+            .print-table th { background: #f0f0f0; }
+            .print-total { text-align: right; font-weight: bold; margin-top: 20px; font-size: 18px; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+    <div id="ui-root"></div>
+    <div id="print-zone"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // ==========================================
+        // 1. โครงสร้างกราฟจักรวาล (Living Graph Memory)
+        // ==========================================
+        const CosmicGraphMemory = {
+            state: { 
+                apiKey: localStorage.getItem('gemini_api_key') || "",
+                currentView: "main", qClient: "", qProject: "", qPrice: ""
+            },
+            nodes: {
+                mainMenu: {
+                    type: "panel", class: "node-hud",
+                    children: [
+                        { type: "header", text: "☸️ Voxel OS : Absolute Core" },
+                        { type: "flex", children: [
+                            { type: "input", id: "apiKeyInput", placeholder: "🔑 วาง Gemini API Key...", bind: "apiKey", password: true },
+                            { type: "button", text: "💾 บันทึก", class: "node-btn", action: "saveKeyManually()" }
+                        ]},
+                        { type: "grid", children: [
+                            { type: "button", text: "👁️ ตาธิปสแกน", action: "triggerEvent('0x2ecc71', 'เปิดระบบตาธิปสแกน')" },
+                            { type: "button", text: "📜 ใบเสนอราคา", action: "switchView('quotation')" },
+                            { type: "button", text: "📉 วิเคราะห์กรรม", action: "triggerEvent('0x3498db', 'วิเคราะห์โครงสร้างกรรม')" },
+                            { type: "button", text: "🧬 วิวัฒนาการ", action: "triggerEvent('0x9b59b6', 'เดินเครื่องวิวัฒนาการตัวเอง')" }
+                        ]}
+                    ]
+                },
+                quotationMenu: {
+                    type: "panel", class: "node-hud",
+                    children: [
+                        { type: "header", text: "📜 Voxel Quotation Engine" },
+                        { type: "input", id: "qClient", placeholder: "ชื่อลูกค้า / บริษัท...", bind: "qClient" },
+                        { type: "input", id: "qProject", placeholder: "ชื่อโปรเจกต์...", bind: "qProject" },
+                        { type: "input", id: "qPrice", placeholder: "ราคาประเมิน (บาท)...", bind: "qPrice" },
+                        { type: "grid", children: [
+                            { type: "button", text: "◀ กลับ", action: "switchView('main')" },
+                            { type: "button", text: "🖨️ สร้าง PDF", action: "generatePDF()" }
+                        ]}
+                    ]
+                },
+                chatDock: {
+                    type: "dock", class: "node-dock",
+                    logs: ["[SYSTEM] ระบบเสียง, หูทิพย์ และสมองกล พร้อมทำงาน..."],
+                    children: [
+                        { type: "flex", children: [
+                            { type: "button", class: "btn-mic", text: "🎤", action: "activateDivineEar()" },
+                            { type: "input", id: "karmicInput", placeholder: "พิมพ์หรือพูดเจตนาถึง Gemini..." },
+                            { type: "button", class: "btn-send", text: "ส่ง", action: "sendKarmicPointer()" }
+                        ]}
+                    ]
+                }
+            }
+        };
+
+        // ==========================================
+        // 2. เอนจินเรนเดอร์ UI (Morphing Engine)
+        // ==========================================
+        function renderGraphToDOM() {
+            const root = document.getElementById('ui-root');
+            root.innerHTML = ''; 
+            
+            const activeNode = CosmicGraphMemory.state.currentView === 'main' ? CosmicGraphMemory.nodes.mainMenu : CosmicGraphMemory.nodes.quotationMenu;
+            const hudDiv = document.createElement('div');
+            hudDiv.className = activeNode.class;
+            
+            activeNode.children.forEach(child => {
+                if(child.type === 'header') {
+                    hudDiv.innerHTML += `<div class="node-header">${child.text}</div>`;
+                } else if(child.type === 'input') {
+                    const val = CosmicGraphMemory.state[child.bind] || "";
+                    hudDiv.innerHTML += `<input type="${child.password ? 'password' : 'text'}" id="${child.id}" class="node-input" placeholder="${child.placeholder}" value="${val}" onchange="updateState('${child.bind}', this.value)" autocomplete="off">`;
+                } else if (child.type === 'flex') {
+                    const flexDiv = document.createElement('div');
+                    flexDiv.style.display = 'flex'; flexDiv.style.gap = '6px'; flexDiv.style.marginBottom = '8px';
+                    const inp = child.children[0]; const btn = child.children[1];
+                    const val = CosmicGraphMemory.state[inp.bind] || "";
+                    flexDiv.innerHTML += `<input type="${inp.password ? 'password' : 'text'}" id="${inp.id}" class="node-input" style="margin:0;" placeholder="${inp.placeholder}" value="${val}" onchange="updateState('${inp.bind}', this.value)">`;
+                    flexDiv.innerHTML += `<button class="${btn.class}" onclick="${btn.action}">${btn.text}</button>`;
+                    hudDiv.appendChild(flexDiv);
+                } else if(child.type === 'grid') {
+                    let btns = child.children.map(b => `<button class="node-btn" onclick="${b.action}">${b.text}</button>`).join('');
+                    hudDiv.innerHTML += `<div class="node-grid">${btns}</div>`;
+                }
+            });
+            root.appendChild(hudDiv);
+
+            const dockData = CosmicGraphMemory.nodes.chatDock;
+            const dockDiv = document.createElement('div'); dockDiv.className = dockData.class;
+            const logHTML = dockData.logs.map(l => `<div>${l}</div>`).join('');
+            dockDiv.innerHTML += `<div class="node-log" id="chatLog">${logHTML}</div>`;
+            
+            const flexDockDiv = document.createElement('div'); flexDockDiv.className = 'dock-input-flex';
+            dockData.children[0].children.forEach(child => {
+                if(child.type === 'input') {
+                    flexDockDiv.innerHTML += `<input type="text" id="${child.id}" class="node-input" style="margin:0;" placeholder="${child.placeholder}" onkeypress="if(event.key==='Enter') sendKarmicPointer()">`;
+                } else if(child.type === 'button') {
+                    flexDockDiv.innerHTML += `<button class="${child.class}" onclick="${child.action}">${child.text}</button>`;
+                }
+            });
+            dockDiv.appendChild(flexDockDiv);
+            root.appendChild(dockDiv);
+            
+            const logEl = document.getElementById('chatLog'); if(logEl) logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        window.updateState = function(key, value) { CosmicGraphMemory.state[key] = value; };
+        window.switchView = function(viewName) { CosmicGraphMemory.state.currentView = viewName; renderGraphToDOM(); };
+        function writeLog(msg) { CosmicGraphMemory.nodes.chatDock.logs.push(`[${new Date().toLocaleTimeString()}] ${msg}`); renderGraphToDOM(); }
+
+        // ==========================================
+        // 3. ระบบชำระล้าง API Key (โยนิโสมนสิการ Error Handler)
+        // ==========================================
+        window.saveKeyManually = function() {
+            const inputEl = document.getElementById('apiKeyInput');
+            // ลบช่องว่าง (Space) และอักขระล่องหนทุกชนิดที่ติดมาตอนก๊อปปี้
+            const newKey = inputEl.value.replace(/[\s\uFEFF\xA0]/g, '');
+            
+            if (newKey && newKey.startsWith("AIza")) {
+                CosmicGraphMemory.state.apiKey = newKey; 
+                localStorage.setItem('gemini_api_key', newKey);
+                inputEl.value = newKey; // อัปเดตช่องให้เป็นรหัสที่สะอาดแล้ว
+                writeLog("💾 บันทึกกุญแจสมบูรณ์ โครงสร้างรหัสถูกต้อง!"); 
+                speakDharma("บันทึกกุญแจเรียบร้อยแล้วครับ");
+            } else {
+                writeLog("⚠️ รูปแบบกุญแจผิดพลาด (ต้องขึ้นต้นด้วย AIza)");
+                speakDharma("กุญแจไม่ถูกต้อง กรุณาตรวจสอบอีกครั้งครับ");
+            }
+        };
+
+        // ==========================================
+        // 4. หูทิพย์ และ ปากทิพย์ (Voice Anima)
+        // ==========================================
+        window.activateDivineEar = function() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                writeLog("❌ เบราว์เซอร์นี้ไม่รองรับระบบหูทิพย์");
+                speakDharma("ขออภัยครับ เบราว์เซอร์ไม่รองรับการฟังเสียง");
+                return;
+            }
+            const recognition = new SpeechRecognition();
+            recognition.lang = 'th-TH'; recognition.interimResults = false;
+            
+            recognition.onstart = () => { writeLog("🎤 กำลังฟังเจตนาของท่าน..."); spawnVoxel('0x2ecc71'); };
+            recognition.onresult = (event) => {
+                const speechResult = event.results[0][0].transcript;
+                document.getElementById('karmicInput').value = speechResult;
+                writeLog(`ได้ยิน: "${speechResult}"`);
+                sendKarmicPointer(); // ฟังเสร็จแล้วส่งทันที
+            };
+            recognition.onerror = (e) => writeLog(`❌ รับเสียงไม่ได้: ${e.error}`);
+            recognition.start();
+        };
+
+        window.speakDharma = function(text) {
+            if ('speechSynthesis' in window) {
+                const cleanText = text.replace(/[*#\[\]_]/g, '');
+                const utterance = new SpeechSynthesisUtterance(cleanText);
+                utterance.lang = 'th-TH'; utterance.rate = 1.1;
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+
+        window.triggerEvent = function(hex, voiceText) { spawnVoxel(hex); writeLog(`⚡ [SYSTEM]: ${voiceText}`); speakDharma(voiceText); };
+
+        // ==========================================
+        // 5. ระบบใบเสนอราคา (PDF)
+        // ==========================================
+        window.generatePDF = function() {
+            const client = CosmicGraphMemory.state.qClient || "ไม่ระบุชื่อลูกค้า";
+            const project = CosmicGraphMemory.state.qProject || "การพัฒนาระบบ Voxel OS";
+            let price = parseFloat(CosmicGraphMemory.state.qPrice) || 0;
+            const vat = price * 0.07; const total = price + vat;
+            const printZone = document.getElementById('print-zone');
+            printZone.innerHTML = `
+                <div class="print-header">ใบเสนอราคา (Quotation)</div>
+                <p><strong>ผู้เสนอราคา:</strong> Chief Architect (ช่างเบิร์ดโคตรเฟี้ยว)</p>
+                <p><strong>ลูกค้า:</strong> ${client}</p><p><strong>วันที่:</strong> ${new Date().toLocaleDateString('th-TH')}</p>
+                <table class="print-table">
+                    <tr><th>รายการ (Description)</th><th style="text-align:right;">จำนวนเงิน (บาท)</th></tr>
+                    <tr><td>${project}</td><td style="text-align:right;">${price.toLocaleString()}</td></tr>
+                    <tr><td style="text-align:right;">ภาษีมูลค่าเพิ่ม (VAT 7%)</td><td style="text-align:right;">${vat.toLocaleString()}</td></tr>
+                </table>
+                <div class="print-total">ราคาสุทธิทั้งสิ้น: ${total.toLocaleString()} บาท</div>
+            `;
+            writeLog("📜 ส่งข้อมูลลงแท่นพิมพ์ PDF..."); speakDharma("กำลังเตรียมเอกสารใบเสนอราคา"); spawnVoxel('0xf1c40f');
+            setTimeout(() => { window.print(); }, 1500);
+        };
+
+        // ==========================================
+        // 6. WebGL 3D Voxel
+        // ==========================================
+        let scene, camera, renderer, graphGroup;
+        function initWebGL() {
+            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x020305, 0.02);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000); camera.position.set(0, 2, 12);
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const light = new THREE.PointLight(0xf39c12, 3, 50); light.position.set(0, 8, 5); scene.add(light);
+            graphGroup = new THREE.Group(); scene.add(graphGroup);
+            
+            const geo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+            const mat = new THREE.MeshStandardMaterial({ color: 0xf39c12, metalness: 0.7, roughness: 0.2 });
+            for (let i = 0; i < 12; i++) {
+                const mesh = new THREE.Mesh(geo, mat); const angle = (i / 12) * Math.PI * 2;
+                mesh.position.set(Math.cos(angle) * 4, (Math.random() - 0.5) * 3, Math.sin(angle) * 4); graphGroup.add(mesh);
+            }
+            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+            animate();
+        }
+
+        window.spawnVoxel = function(colorHex) {
+            const c = parseInt(colorHex, 16); const geo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            const mat = new THREE.MeshStandardMaterial({ color: c, emissive: c });
+            const mesh = new THREE.Mesh(geo, mat); mesh.position.set((Math.random() - 0.5) * 2, 0, (Math.random() - 0.5) * 2);
+            scene.add(mesh); let life = 50;
+            const anim = setInterval(() => { mesh.position.y += 0.05; mesh.rotation.y += 0.1; life--; if(life <= 0) { clearInterval(anim); scene.remove(mesh); } }, 30);
+        };
+        function animate() { requestAnimationFrame(animate); if(graphGroup) graphGroup.rotation.y += 0.002; renderer.render(scene, camera); }
+
+        // ==========================================
+        // 7. Gemini Bridge & Explicit Error Core
+        // ==========================================
+        window.sendKarmicPointer = async function() {
+            const input = document.getElementById('karmicInput'); const text = input.value.trim(); if(!text) return;
+            const apiKey = localStorage.getItem('gemini_api_key') || CosmicGraphMemory.state.apiKey;
+            if(!apiKey) { writeLog("⚠ กรุณาวางและบันทึกรหัสก่อน"); speakDharma("กรุณาวางรหัสก่อนครับ"); return; }
+
+            writeLog(`<b>ช่างเบิร์ด:</b> ${text}`); input.value = ''; spawnVoxel('0xf39c12');
+            
+            try {
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: "คุณคือ Voxel OS ให้ตอบสั้นๆ ชัดเจน เหมือนเพื่อนคุยกัน: " + text }] }] })
+                });
+                const data = await res.json();
+                
+                // ตรวจจับ Error จากฝั่ง Google โดยตรงเพื่อความชัดเจน
+                if (!res.ok) {
+                    const exactError = data.error ? data.error.message : "Unknown Error";
+                    writeLog(`❌ [API ตีกลับ]: ${exactError}`);
+                    speakDharma("การเชื่อมต่อถูกตีกลับ กรุณาตรวจสอบรหัสอีกครั้งครับ");
+                    return;
+                }
+
+                if(data.candidates) {
+                    const aiReply = data.candidates[0].content.parts[0].text;
+                    writeLog(`✨ [OS]: ${aiReply}`); speakDharma(aiReply);
+                }
+            } catch(e) { writeLog(`❌ [NETWORK ERROR]: ${e.message}`); speakDharma("เกิดข้อผิดพลาดในการเชื่อมต่ออินเทอร์เน็ตครับ"); }
+        };
+
+        // เริ่มวงจรชีวิต (Boot Sequence)
+        initWebGL(); renderGraphToDOM();
+    </script>
+</body>
+</html>
