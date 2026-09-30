@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voxel Cell OS : Omniverse (Stream + Document)</title>
+    <style>
+        :root {
+            --bg-color: #030508; 
+            --hud-bg: rgba(10, 15, 25, 0.5); 
+            --hud-border: rgba(0, 243, 255, 0.25);
+            --cyan-accent: #00f3ff; --cyan-glow: rgba(0, 243, 255, 0.7);
+            --gold-accent: #f39c12; --green-accent: #2ecc71; --text-main: #f8f9fa;
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-color); font-family: 'Segoe UI', Tahoma, sans-serif; color: var(--text-main); touch-action: none; }
+        #webgl-canvas { position: absolute; top: 0; left: 0; z-index: 1; width: 100%; height: 100%; }
+        
+        #camera-feed, #pixel-buffer-canvas, #doc-buffer-canvas { display: none; }
+
+        #ui-root { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 20px 10px; box-sizing: border-box; }
+        
+        .node-hud { 
+            position: relative; margin: 0 auto; width: 100%; max-width: 440px; 
+            background: var(--hud-bg); border: 1px solid var(--hud-border); 
+            box-shadow: 0 16px 40px rgba(0,0,0,0.8), inset 0 0 30px rgba(0,243,255,0.08); 
+            border-radius: 20px; padding: 16px; 
+            backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); 
+            pointer-events: auto; transition: all 0.3s;
+        }
+        
+        .node-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 12px; color: var(--cyan-accent); font-weight: bold; font-size: 1.1rem; text-shadow: 0 0 10px var(--cyan-glow); letter-spacing: 1px; }
+        .status-dot { width: 10px; height: 10px; background-color: var(--green-accent); border-radius: 50%; box-shadow: 0 0 10px var(--green-accent); animation: pulse 2s infinite; }
+        .status-dot.active { background-color: var(--gold-accent); box-shadow: 0 0 15px var(--gold-accent); animation: fastPulse 0.5s infinite; }
+        
+        .node-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .node-btn { background: rgba(0, 243, 255, 0.05); color: #fff; border: 1px solid rgba(0, 243, 255, 0.2); padding: 12px; border-radius: 12px; cursor: pointer; font-size: 0.85rem; font-weight: bold; transition: all 0.2s; backdrop-filter: blur(5px); text-align: center; }
+        .node-btn:hover { background: rgba(0, 243, 255, 0.2); border-color: var(--cyan-accent); transform: translateY(-2px); box-shadow: 0 5px 15px var(--cyan-glow); }
+        
+        .btn-stream { background: linear-gradient(135deg, #ff0055, #9b59b6); border: none; box-shadow: 0 4px 20px rgba(255,0,85,0.4); }
+        .btn-doc { background: linear-gradient(135deg, #f39c12, #d35400); border: none; box-shadow: 0 4px 20px rgba(243,156,18,0.4); }
+        
+        .node-log { font-family: 'Courier New', monospace; font-size: 0.75rem; color: var(--cyan-accent); max-height: 90px; overflow-y: auto; margin-top: 10px; background: rgba(0,0,0,0.6); padding: 10px; border-radius: 8px; border-left: 3px solid var(--cyan-accent); pointer-events: auto; }
+        
+        @keyframes pulse { 0% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } 100% { opacity: 0.4; transform: scale(1); } }
+        @keyframes fastPulse { 0% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.8); } 100% { opacity: 0.6; transform: scale(1); } }
+    </style>
+    
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.150.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.150.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+    <video id="camera-feed" autoplay playsinline></video>
+    <canvas id="pixel-buffer-canvas"></canvas>
+    <canvas id="doc-buffer-canvas"></canvas>
+    
+    <div id="ui-root"></div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        // ==========================================
+        // 1. STATE & SCHEMAS
+        // ==========================================
+        const Res = { w: 120, h: 90, spacing: 0.1, size: 0.08, total: 10800 }; 
+        
+        window.SexyCellOS = {
+            mode: 'IDLE', // 'IDLE' | 'STREAM' | 'DOCUMENT'
+            cam: 'user',
+            logs: ["[YONISO KERNEL] Omniverse Core กำลังเดินเครื่อง..."],
+            touch: { x: -9999, y: -9999, active: false }
+        };
+
+        function writeLog(msg) { window.SexyCellOS.logs.push(`[${new Date().toLocaleTimeString()}] ✨ ${msg}`); window.renderCellDOM(); }
+        function speak(text) { if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(text); u.lang='th-TH'; u.rate=1.2; window.speechSynthesis.speak(u); } }
+
+        // ==========================================
+        // 2. DOM RENDERER
+        // ==========================================
+        window.renderCellDOM = function() {
+            const root = document.getElementById('ui-root'); root.innerHTML = ''; 
+            const mode = window.SexyCellOS.mode;
+            
+            const hudDiv = document.createElement('div'); hudDiv.className = 'node-hud';
+            hudDiv.innerHTML = `
+                <div class="node-header">
+                    <span>🌌 Voxel Omniverse</span>
+                    <div class="status-dot ${mode !== 'IDLE' ? 'active' : ''}"></div>
+                </div>
+                <div class="node-grid">
+                    <button class="node-btn btn-stream" onclick="toggleMode('STREAM')">
+                        ${mode === 'STREAM' ? '🔴 ดับตาทิพย์' : '👁️ เปิดตาทิพย์ (Camera)'}
+                    </button>
+                    <button class="node-btn btn-doc" onclick="toggleMode('DOCUMENT')">
+                        ${mode === 'DOCUMENT' ? '🔴 ปิดเอกสาร' : '📄 ฉายเอกสารโฮโลแกรม'}
+                    </button>
+                </div>
+                <button class="node-btn" style="width:100%; margin-top:5px;" onclick="toggleCamera()">🔄 สลับกล้อง: ${window.SexyCellOS.cam === 'user' ? 'หน้า' : 'หลัง'}</button>
+                <div class="node-log" id="chatLog">${window.SexyCellOS.logs.slice(-4).map(l => `<div>${l}</div>`).join('')}</div>
+            `;
+            root.appendChild(hudDiv);
+            const logEl = document.getElementById('chatLog'); if(logEl) logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        window.toggleCamera = function() {
+            window.SexyCellOS.cam = window.SexyCellOS.cam === 'user' ? 'environment' : 'user';
+            writeLog("เตรียมสลับกล้อง...");
+            if(window.SexyCellOS.mode === 'STREAM') { startStream(); }
+            window.renderCellDOM();
+        }
+
+        window.toggleMode = async function(targetMode) {
+            if (window.SexyCellOS.mode === targetMode) {
+                stopAll();
+                window.SexyCellOS.mode = 'IDLE';
+                writeLog("กลับสู่สภาวะความว่าง (IDLE)");
+            } else {
+                stopAll();
+                window.SexyCellOS.mode = targetMode;
+                if (targetMode === 'STREAM') await startStream();
+                if (targetMode === 'DOCUMENT') await startDocumentMode();
+            }
+            window.renderCellDOM();
+        }
+
+        // ==========================================
+        // 3. THREE.JS ENGINE & BLOOM
+        // ==========================================
+        let scene, camera, renderer, composer, voxelInstancedMesh, coreGroup;
+        const dummy = new THREE.Object3D(); 
+        const colorTemp = new THREE.Color();
+        const MAX_VOXELS = 15000; 
+
+        function initWebGL() {
+            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x000000, 0.04);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000); 
+            camera.position.set(0, 0, 10);
+            
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight); 
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 2.0, 0.5, 0.1);
+            composer = new EffectComposer(renderer);
+            composer.addPass(new RenderPass(scene, camera));
+            composer.addPass(bloomPass);
+
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            
+            voxelInstancedMesh = new THREE.InstancedMesh(geometry, material, MAX_VOXELS);
+            voxelInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            voxelInstancedMesh.visible = false; 
+            scene.add(voxelInstancedMesh);
+
+            coreGroup = new THREE.Group(); scene.add(coreGroup);
+            const matCore = new THREE.MeshBasicMaterial({color: 0x00f3ff, wireframe:true});
+            coreGroup.add(new THREE.Mesh(new THREE.IcosahedronGeometry(2, 1), matCore));
+
+            window.addEventListener('resize', () => { 
+                camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); 
+                renderer.setSize(window.innerWidth, window.innerHeight); composer.setSize(window.innerWidth, window.innerHeight);
+            });
+            
+            // Touch/Mouse Physics Event
+            const updateTouch = (e) => {
+                let cx = e.touches ? e.touches[0].clientX : e.clientX;
+                let cy = e.touches ? e.touches[0].clientY : e.clientY;
+                window.SexyCellOS.touch.x = ((cx / window.innerWidth) * 2 - 1) * 8;
+                window.SexyCellOS.touch.y = (-(cy / window.innerHeight) * 2 + 1) * 6;
+                window.SexyCellOS.touch.active = true;
+            };
+            const endTouch = () => { window.SexyCellOS.touch.active = false; };
+            window.addEventListener('mousemove', updateTouch); window.addEventListener('touchmove', updateTouch);
+            window.addEventListener('mousedown', () => window.SexyCellOS.touch.active = true);
+            window.addEventListener('mouseup', endTouch); window.addEventListener('touchend', endTouch);
+
+            animate();
+        }
+
+        // ==========================================
+        // 4. AUDIO API (Web Audio)
+        // ==========================================
+        let audioCtx, analyser, dataArray;
+        async function initAudio() {
+            if(!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioCtx.createAnalyser(); analyser.fftSize = 64;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+            }
+            if(audioCtx.state === 'suspended') await audioCtx.resume();
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const source = audioCtx.createMediaStreamSource(stream);
+                source.connect(analyser); // No dest connection (no feedback)
+            } catch(e) { writeLog("ไม่มีสิทธิ์เข้าถึงไมค์ กราฟเสียงจะไม่ทำงาน"); }
+        }
+
+        // ==========================================
+        // 5. LOGIC & PIPELINES
+        // ==========================================
+        const videoEl = document.getElementById('camera-feed');
+        const bufferCanvas = document.getElementById('pixel-buffer-canvas');
+        const docCanvas = document.getElementById('doc-buffer-canvas');
+        let streamTrack = null, animationFrameId = null;
+
+        function stopAll() {
+            if(streamTrack) { streamTrack.stop(); streamTrack = null; }
+            if(animationFrameId) { cancelAnimationFrame(animationFrameId); animationFrameId = null; }
+            videoEl.srcObject = null;
+            voxelInstancedMesh.visible = false; coreGroup.visible = true;
+        }
+
+        // --- MODE 1: DIVINE EYE ---
+        async function startStream() {
+            await initAudio();
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: window.SexyCellOS.cam, width: 320 } });
+                videoEl.srcObject = stream; streamTrack = stream.getVideoTracks()[0];
+                await new Promise(r => videoEl.onloadedmetadata = r); videoEl.play();
+                
+                bufferCanvas.width = Res.w; bufferCanvas.height = Res.h;
+                coreGroup.visible = false; voxelInstancedMesh.visible = true;
+                writeLog("ตาทิพย์ควอนตัมเชื่อมต่อสำเร็จ"); speak("เปิดระบบตาทิพย์");
+                runPipeline('STREAM');
+            } catch (err) { writeLog(`STREAM ERROR: ${err.message}`); }
+        }
+
+        // --- MODE 2: VOXEL DOCUMENT ---
+        async function startDocumentMode() {
+            await initAudio();
+            docCanvas.width = Res.w; docCanvas.height = Res.h;
+            const ctx = docCanvas.getContext('2d');
+            
+            // วาดเอกสารลง Canvas แบบ 2D (สีขาวดำ/ทอง เพื่อดึงเป็น Voxel)
+            ctx.fillStyle = 'black'; ctx.fillRect(0,0, Res.w, Res.h);
+            
+            ctx.fillStyle = '#00f3ff'; ctx.font = 'bold 12px Arial';
+            ctx.fillText("VOXEL QUOTATION", 5, 20);
+            
+            ctx.fillStyle = '#ffffff'; ctx.font = '8px Arial';
+            ctx.fillText("CLIENT: Chief Architect", 5, 35);
+            ctx.fillText("SYSTEM: Voxel Cell OS", 5, 45);
+            
+            // วาดเส้นแบ่ง
+            ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(5, 50, 110, 2);
+            
+            ctx.fillStyle = '#f39c12'; ctx.font = 'bold 14px Arial';
+            ctx.fillText("TOTAL: $99,999", 5, 70);
+
+            coreGroup.visible = false; voxelInstancedMesh.visible = true;
+            writeLog("สถาปัตยกรรมเอกสารโฮโลแกรมพร้อมแล้ว"); speak("ฉายเอกสารโฮโลแกรมครับ");
+            runPipeline('DOCUMENT');
+        }
+
+        let timeOffset = 0;
+        function runPipeline(type) {
+            if(window.SexyCellOS.mode !== type) return;
+            
+            timeOffset += 0.05;
+            let audioBass = 0;
+            if(analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                audioBass = (dataArray[0] + dataArray[1]) / 2 / 255.0; // 0.0 - 1.0
+            }
+
+            const ctx = (type === 'STREAM') ? bufferCanvas.getContext('2d', {willReadFrequently:true}) : docCanvas.getContext('2d', {willReadFrequently:true});
+            if(type === 'STREAM') ctx.drawImage(videoEl, 0, 0, Res.w, Res.h);
+            
+            const imgData = ctx.getImageData(0, 0, Res.w, Res.h).data;
+            const offsetX = (Res.w * Res.spacing) / 2; const offsetY = (Res.h * Res.spacing) / 2;
+            const isMirror = (type === 'STREAM' && window.SexyCellOS.cam === 'user');
+            const tx = window.SexyCellOS.touch.x; const ty = window.SexyCellOS.touch.y; const isTouch = window.SexyCellOS.touch.active;
+
+            let idx = 0;
+            for (let y = 0; y < Res.h; y++) {
+                for (let x = 0; x < Res.w; x++) {
+                    const i = (y * Res.w + x) * 4;
+                    const r = imgData[i]; const g = imgData[i+1]; const b = imgData[i+2];
+                    const brightness = (r*0.299 + g*0.587 + b*0.114) / 255;
+                    
+                    if (brightness < 0.1) continue; // ซ่อน Dark Matter
+
+                    const targetX = isMirror ? (Res.w - x - 1) : x; 
+                    let pX = (targetX * Res.spacing) - offsetX;
+                    let pY = -(y * Res.spacing) + offsetY;
+                    
+                    // แกน Z: ถ่ายทอดความหมายด้วยความลึก (เอกสาร หรือ ภาพกล้อง)
+                    let pZ = 0;
+                    if(type === 'DOCUMENT') {
+                        // เอกสารให้ลอยนูนขึ้นมา และกระเพื่อมตามเสียงหนักๆ
+                        pZ = (brightness * 1.5) + (Math.sin(timeOffset + pX)*0.2) + (audioBass * 2.0);
+                    } else {
+                        pZ = (brightness * 2.5) + (audioBass * 1.0); 
+                    }
+                    
+                    // Ripple Physics (ทัชสกรีนเพื่อปัดเป่า)
+                    if (isTouch) {
+                        let dx = pX - tx; let dy = pY - ty; let dist = Math.sqrt(dx*dx + dy*dy);
+                        if(dist < 2.5) { 
+                            let force = (2.5 - dist) * 1.5; pX += (dx/dist)*force; pY += (dy/dist)*force; pZ += force*2; 
+                        }
+                    }
+
+                    dummy.position.set(pX, pY, pZ);
+                    let dynSize = Res.size * (0.8 + (audioBass * 0.6));
+                    dummy.scale.set(dynSize, dynSize, dynSize);
+                    dummy.updateMatrix();
+                    voxelInstancedMesh.setMatrixAt(idx, dummy.matrix);
+                    
+                    colorTemp.setRGB(r/150, g/150, b/150); // ดันแสงให้พุ่ง
+                    voxelInstancedMesh.setColorAt(idx, colorTemp);
+                    idx++;
+                }
+            }
+            
+            voxelInstancedMesh.count = idx; 
+            voxelInstancedMesh.instanceMatrix.needsUpdate = true;
+            voxelInstancedMesh.instanceColor.needsUpdate = true;
+            
+            // แกว่งโฮโลแกรมเล็กน้อย
+            const now = Date.now() * 0.001;
+            voxelInstancedMesh.rotation.y = Math.sin(now * 0.5) * 0.1;
+            voxelInstancedMesh.rotation.x = Math.cos(now * 0.3) * 0.05;
+
+            animationFrameId = requestAnimationFrame(() => runPipeline(type));
+        }
+
+        // ==========================================
+        // 6. RENDER LOOP
+        // ==========================================
+        function animate() {
+            requestAnimationFrame(animate);
+            if(coreGroup.visible) { coreGroup.rotation.y += 0.01; coreGroup.rotation.x += 0.005; }
+            composer.render();
+        }
+
+        initWebGL(); window.renderCellDOM(); writeLog("พร้อมรับบัญชาการครับ");
+    </script>
+</body>
+</html>
