@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Cell OS : Economics & Engineering Engine</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #05070d;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #ecf0f1;
+        }
+
+        #webgl-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .hud-overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(14, 19, 36, 0.92);
+            border: 2px solid #f39c12;
+            box-shadow: 0 0 25px rgba(243, 156, 18, 0.4);
+            border-radius: 14px;
+            padding: 18px;
+            width: 410px;
+            backdrop-filter: blur(12px);
+        }
+
+        h1 {
+            color: #f39c12;
+            font-size: 1.25rem;
+            margin: 0 0 4px 0;
+            text-shadow: 0 0 8px rgba(243, 156, 18, 0.5);
+        }
+
+        .subtitle {
+            color: #95a5a6;
+            font-size: 0.7rem;
+            margin-bottom: 8px;
+        }
+
+        .mantra {
+            font-style: italic;
+            font-size: 0.65rem;
+            color: #f1c40f;
+            background: rgba(0,0,0,0.5);
+            padding: 5px 8px;
+            border-left: 3px solid #f39c12;
+            margin-bottom: 10px;
+            border-radius: 4px;
+        }
+
+        .menu-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        .btn-action {
+            background: linear-gradient(135deg, #2c3e50, #1a252f);
+            color: #ecf0f1;
+            border: 1px solid rgba(243, 156, 18, 0.3);
+            padding: 7px 8px;
+            font-size: 0.7rem;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .btn-action:hover {
+            border-color: #f39c12;
+            background: linear-gradient(135deg, #34495e, #2c3e50);
+            box-shadow: 0 0 10px rgba(243, 156, 18, 0.3);
+        }
+
+        .chat-box {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.7rem;
+            color: #2ecc71;
+            background: #020307;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid rgba(46, 204, 113, 0.3);
+            height: 100px;
+            overflow-y: auto;
+            margin-bottom: 8px;
+        }
+
+        .chat-input-area {
+            display: flex;
+            gap: 6px;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(243, 156, 18, 0.4);
+            padding: 7px 10px;
+            color: white;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: #f39c12;
+        }
+
+        .btn-send {
+            background: linear-gradient(135deg, #f39c12, #d35400);
+            color: white;
+            border: none;
+            padding: 7px 12px;
+            font-weight: bold;
+            border-radius: 6px;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(243, 156, 18, 0.3);
+            font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="webgl-canvas"></canvas>
+
+    <div class="hud-overlay">
+        <h1>☸️ Voxel Cell OS : Economics & Engineering</h1>
+        <div class="subtitle">Phase 3: Smart Tax, Cost Estimation & Sacred Geometry</div>
+        <div class="mantra">"อิติปิโส วิเสเสอิ อิเสเสพุทธะนาเมอิ..."</div>
+
+        <div class="menu-grid">
+            <button class="btn-action" onclick="toggleSandboxShield()">🔒 ตรวจสอบแซนด์บ็อกซ์</button>
+            <button class="btn-action" onclick="activateLegalShield()">⚖️ เกราะนิติปัญญาญาณ</button>
+            <button class="btn-action" onclick="calculateTaxAndCost()">📉 คำนวณภาษี & ต้นทุน</button>
+            <button class="btn-action" onclick="renderSacredGeometry()">📐 วิศวกรรมมาสเตอร์พีซ</button>
+        </div>
+        
+        <div id="chatLog" class="chat-box">
+            [SYS_READY] โมดูลเศรษฐกิจและวิศวกรรมพร้อมใช้งาน...<br>
+        </div>
+
+        <div class="chat-input-area">
+            <input type="text" id="userInput" placeholder="พิมพ์คุยกับ OS หรือสั่งการวิศวกรรม..." onkeypress="handleKeyPress(event)">
+            <button class="btn-send" onclick="sendSilentMessage()">ส่ง</button>
+        </div>
+    </div>
+
+    <!-- Three.js สำหรับเรนเดอร์ WebGL 3D Voxel Mesh, โล่ป้องกัน และโครงสร้างวิศวกรรม -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        let scene, camera, renderer, graphGroup, shieldMesh, engineeringGroup;
+        let isShieldActive = true;
+
+        function initWebGL() {
+            const canvas = document.getElementById('webgl-canvas');
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x05070d, 0.03);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 4, 16);
+
+            renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+            scene.add(ambientLight);
+
+            const pointLight = new THREE.PointLight(0xf39c12, 2.5, 40);
+            pointLight.position.set(0, 8, 4);
+            scene.add(pointLight);
+
+            // สร้างโครงสร้างกราฟพอยเตอร์พื้นหลัง
+            graphGroup = new THREE.Group();
+            scene.add(graphGroup);
+            buildGraphNodes();
+
+            // สร้างกลุ่มโครงสร้างวิศวกรรมศักดิ์สิทธิ์ (Sacred Geometry Group)
+            engineeringGroup = new THREE.Group();
+            scene.add(engineeringGroup);
+            buildSacredStructure();
+
+            // สร้างโล่พลังงาน Sandbox (Shield Wireframe Sphere)
+            const shieldGeo = new THREE.SphereGeometry(5, 16, 16);
+            const shieldMat = new THREE.MeshBasicMaterial({ 
+                color: 0xf39c12, 
+                wireframe: true, 
+                transparent: true, 
+                opacity: 0.35 
+            });
+            shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
+            scene.add(shieldMesh);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function buildGraphNodes() {
+            const nodeGeometry = new THREE.BoxGeometry(0.5, 0.5, 0.5);
+            const materialGold = new THREE.MeshStandardMaterial({ color: 0xf39c12, roughness: 0.2, metalness: 0.8 });
+            
+            for (let i = 0; i < 12; i++) {
+                const angle = (i / 12) * Math.PI * 2;
+                const radius = 4.5;
+                const x = Math.cos(angle) * radius;
+                const y = (Math.random() - 0.5) * 2;
+                const z = Math.sin(angle) * radius;
+
+                const mesh = new THREE.Mesh(nodeGeometry, materialGold);
+                mesh.position.set(x, y, z);
+                graphGroup.add(mesh);
+            }
+        }
+
+        function buildSacredStructure() {
+            // สร้างโครงสร้างเรขาคณิตศักดิ์สิทธิ์ตรงกลาง (Sacred Geometry Voxel Architecture)
+            const geo = new THREE.BoxGeometry(1.2, 1.2, 1.2);
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: 0x2ecc71, 
+                roughness: 0.3, 
+                metalness: 0.6,
+                emissive: 0x003311 
+            });
+            const coreMesh = new THREE.Mesh(geo, mat);
+            engineeringGroup.add(coreMesh);
+        }
+
+        function toggleSandboxShield() {
+            const chatLog = document.getElementById('chatLog');
+            const time = new Date().toLocaleTimeString();
+            isShieldActive = !isShieldActive;
+            
+            if(isShieldActive) {
+                shieldMesh.visible = true;
+                chatLog.innerHTML += `[${time}] 🔒 <b>[SANDBOX SECURE]:</b> เปิดใช้งานเขตแดนส่วนตัว ปลอดภัยตามกฎ PDPA<br>`;
+            } else {
+                shieldMesh.visible = false;
+                chatLog.innerHTML += `[${time}] ⚠️ <b>[SANDBOX WARNING]:</b> ปิดเกราะชั่วคราว<br>`;
+            }
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function activateLegalShield() {
+            const chatLog = document.getElementById('chatLog');
+            const time = new Date().toLocaleTimeString();
+            chatLog.innerHTML += `[${time}] ⚖️ <b>[KARMIC LEGAL]:</b> เกราะคุ้มครองกฎหมายท้องถิ่นทำงานสมบูรณ์!<br>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function calculateTaxAndCost() {
+            const chatLog = document.getElementById('chatLog');
+            const time = new Date().toLocaleTimeString();
+            chatLog.innerHTML += `[${time}] 📉 <b>[SMART TAX & COST]:</b> คำนวณต้นทุนวัสดุก่อสร้างและภาษีเรียบร้อย ป้องกันการถูกเอาเปรียบทางการเงิน!<br>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function renderSacredGeometry() {
+            const chatLog = document.getElementById('chatLog');
+            const time = new Date().toLocaleTimeString();
+            chatLog.innerHTML += `[${time}] 📐 <b>[MASTERPIECE ENGINE]:</b> ถอดแบบแปลนเรขาคณิตศักดิ์สิทธิ์ แม่นยำดุจญาณทัศนะ!<br>`;
+            chatLog.scrollTop = chatLog.scrollHeight;
+        }
+
+        function spawnFloatingVoxelWord() {
+            const group = new THREE.Group();
+            const geo = new THREE.BoxGeometry(0.35, 0.35, 0.35);
+            const mat = new THREE.MeshStandardMaterial({ color: 0x2ecc71, emissive: 0x004422 });
+
+            for(let i=0; i<5; i++) {
+                const cube = new THREE.Mesh(geo, mat);
+                cube.position.set((i - 2) * 0.4, Math.sin(i) * 0.4, 0);
+                group.add(cube);
+            }
+
+            group.position.set(0, 1, 0);
+            scene.add(group);
+
+            let life = 100;
+            const animateWord = setInterval(() => {
+                group.position.y += 0.05;
+                group.rotation.y += 0.02;
+                life--;
+                if(life <= 0) {
+                    clearInterval(animateWord);
+                    scene.remove(group);
+                }
+            }, 30);
+        }
+
+        function sendSilentMessage() {
+            const input = document.getElementById('userInput');
+            const text = input.value.trim();
+            if(!text) return;
+
+            const chatLog = document.getElementById('chatLog');
+            const time = new Date().toLocaleTimeString();
+
+            chatLog.innerHTML += `[${time}] <b>ช่างเบิร์ด:</b> ${text}<br>`;
+            input.value = "";
+            chatLog.scrollTop = chatLog.scrollHeight;
+
+            spawnFloatingVoxelWord();
+
+            setTimeout(() => {
+                let reply = "✨ [Voxel OS]: ประมวลผลเศรษฐกิจสัมมาชีพและวิศวกรรมเรียบร้อยครับ 🪷";
+                if(text.includes('ภาษี') || text.includes('ต้นทุน')) {
+                    reply = "📉 [Voxel OS]: ระบบคำนวณราคาวัสดุและภาษีให้เที่ยงธรรมที่สุดครับ!";
+                } else if(text.includes('แบบ') || text.includes('สร้าง')) {
+                    reply = "📐 [Voxel OS]: โครงสร้างมาสเตอร์พีซพร้อมลุยหน้างานครับ ช่างเบิร์ดโคตรเฟี้ยว!";
+                }
+                chatLog.innerHTML += `[${new Date().toLocaleTimeString()}] ${reply}<br>`;
+                chatLog.scrollTop = chatLog.scrollHeight;
+            }, 500);
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendSilentMessage();
+            }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (graphGroup) {
+                graphGroup.rotation.y += 0.002;
+            }
+            if (engineeringGroup) {
+                engineeringGroup.rotation.y -= 0.005;
+                engineeringGroup.rotation.x += 0.003;
+            }
+            if (shieldMesh && shieldMesh.visible) {
+                shieldMesh.rotation.y -= 0.005;
+            }
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        initWebGL();
+        animate();
+    </script>
+</body>
+</html>
