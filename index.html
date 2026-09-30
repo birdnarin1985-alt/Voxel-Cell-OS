@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voxel Cell OS : Divine Eye Pro</title>
+    <style>
+        :root {
+            --bg-color: #010204; 
+            --hud-bg: rgba(255, 255, 255, 0.03); 
+            --hud-border: rgba(255, 255, 255, 0.12);
+            --gold-accent: #f39c12; --gold-glow: rgba(243, 156, 18, 0.4);
+            --cyan-accent: #00f3ff; --cyan-glow: rgba(0, 243, 255, 0.4);
+            --green-accent: #2ecc71; --error-accent: #e74c3c; --text-main: #f8f9fa;
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-color); font-family: 'Segoe UI', Tahoma, sans-serif; color: var(--text-main); }
+        #webgl-canvas { position: absolute; top: 0; left: 0; z-index: 1; width: 100%; height: 100%; }
+        
+        /* สตรีมกล้องและ Canvas ที่ซ่อนไว้ */
+        #camera-feed, #pixel-buffer-canvas { display: none; }
+
+        #ui-root { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 15px 0; box-sizing: border-box; }
+        
+        .node-hud, .node-dock { 
+            position: relative; margin: 0 auto; width: 92%; max-width: 440px; 
+            background: var(--hud-bg); border: 1px solid var(--hud-border); 
+            box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.45), inset 0 0 25px rgba(255, 255, 255, 0.02); 
+            border-radius: 20px; padding: 16px; 
+            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); 
+            pointer-events: auto; box-sizing: border-box; transition: all 0.35s ease; 
+        }
+        
+        .node-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 8px; margin-bottom: 12px; color: var(--gold-accent); font-weight: bold; font-size: 1rem; text-shadow: 0 0 10px var(--gold-glow); }
+        .status-dot { width: 8px; height: 8px; background-color: var(--green-accent); border-radius: 50%; box-shadow: 0 0 10px var(--green-accent); animation: pulse 2s infinite; }
+        .status-dot.streaming { background-color: var(--cyan-accent); box-shadow: 0 0 15px var(--cyan-accent); animation: fastPulse 0.5s infinite; }
+        
+        .node-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+        .node-btn { background: rgba(255,255,255,0.04); color: #fff; border: 1px solid rgba(255,255,255,0.12); padding: 10px; border-radius: 10px; cursor: pointer; font-size: 0.75rem; font-weight: bold; transition: all 0.2s; backdrop-filter: blur(5px); text-align: center;}
+        .node-btn:hover { background: rgba(0, 243, 255, 0.15); border-color: var(--cyan-accent); transform: translateY(-2px); box-shadow: 0 5px 15px var(--cyan-glow); }
+        .btn-stream { background: linear-gradient(135deg, #8e44ad, #9b59b6); border: none; box-shadow: 0 4px 15px rgba(142,68,173,0.4); }
+        
+        .node-log { font-family: 'Courier New', monospace; font-size: 0.72rem; color: var(--green-accent); max-height: 90px; overflow-y: auto; margin-bottom: 10px; background: rgba(0,0,0,0.45); padding: 8px; border-radius: 8px; border-left: 3px solid var(--green-accent); }
+        
+        @keyframes pulse { 0% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.4); } 100% { opacity: 0.4; transform: scale(1); } }
+        @keyframes fastPulse { 0% { opacity: 0.6; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } 100% { opacity: 0.6; transform: scale(1); } }
+    </style>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+    <video id="camera-feed" autoplay playsinline></video>
+    <canvas id="pixel-buffer-canvas"></canvas>
+    
+    <div id="ui-root"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // ==========================================
+        // 1. DATA SCHEMA & STATE
+        // ==========================================
+        const ResMatrix = [
+            { name: "LOW (7.5k Voxels)", w: 100, h: 75, spacing: 0.13, size: 0.12 },
+            { name: "HIGH (19.2k Voxels)", w: 160, h: 120, spacing: 0.08, size: 0.075 },
+            { name: "ULTRA (30k Voxels)", w: 200, h: 150, spacing: 0.065, size: 0.06 }
+        ];
+
+        const SexyCellOS = {
+            s: { isStreaming: false, currentCam: 'user', resIdx: 0 },
+            logs: ["[YONISO KERNEL] Holographic Matrix Ready."],
+        };
+
+        function writeLog(msg) { SexyCellOS.logs.push(`[${new Date().toLocaleTimeString()}] ✨ ${msg}`); renderCellDOM(); }
+        function speakDharma(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text); utterance.lang = 'th-TH'; utterance.rate = 1.15;
+                window.speechSynthesis.speak(utterance);
+            }
+        }
+
+        // ==========================================
+        // 2. UI DOM (GLASSMORPHISM)
+        // ==========================================
+        function renderCellDOM() {
+            const root = document.getElementById('ui-root'); root.innerHTML = ''; 
+            const isStream = SexyCellOS.s.isStreaming;
+            const resName = ResMatrix[SexyCellOS.s.resIdx].name;
+            const camName = SexyCellOS.s.currentCam === 'user' ? 'กล้องหน้า' : 'กล้องหลัง';
+            
+            const hudDiv = document.createElement('div'); hudDiv.className = 'node-hud';
+            hudDiv.innerHTML = `
+                <div class="node-header">
+                    <span>☸️ Voxel Cell OS</span>
+                    <div class="status-dot ${isStream ? 'streaming' : ''}"></div>
+                </div>
+                <div class="node-grid">
+                    <button class="node-btn" onclick="toggleCamera()">🔄 ${camName}</button>
+                    <button class="node-btn" onclick="toggleRes()">✨ ${resName}</button>
+                </div>
+                <button class="node-input btn-stream" style="color:white; width:100%; margin-top:5px; font-weight:bold; font-size:1rem;" onclick="toggleDivineEye()">
+                    ${isStream ? '🔴 ปิดตาทิพย์' : '👁️ เปิดตาทิพย์ (Voxel Stream)'}
+                </button>
+            `;
+            root.appendChild(hudDiv);
+
+            const dockDiv = document.createElement('div'); dockDiv.className = 'node-dock';
+            const logHTML = SexyCellOS.logs.map(l => `<div>${l}</div>`).join('');
+            dockDiv.innerHTML = `<div class="node-log" id="chatLog">${logHTML}</div>`;
+            root.appendChild(dockDiv);
+            
+            const logEl = document.getElementById('chatLog'); if(logEl) logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        window.toggleCamera = async function() {
+            SexyCellOS.s.currentCam = SexyCellOS.s.currentCam === 'user' ? 'environment' : 'user';
+            writeLog(`สลับเป็น ${SexyCellOS.s.currentCam === 'user' ? 'กล้องหน้า' : 'กล้องหลัง'}`);
+            if(SexyCellOS.s.isStreaming) await startStream(); // รีสตาร์ทสตรีม
+            else renderCellDOM();
+        };
+
+        window.toggleRes = function() {
+            SexyCellOS.s.resIdx = (SexyCellOS.s.resIdx + 1) % ResMatrix.length;
+            const newRes = ResMatrix[SexyCellOS.s.resIdx];
+            writeLog(`เปลี่ยนความละเอียดเป็น: ${newRes.name}`);
+            
+            // ปรับขนาด Canvas Buffer
+            bufferCanvas.width = newRes.w;
+            bufferCanvas.height = newRes.h;
+            renderCellDOM();
+        };
+
+        // ==========================================
+        // 3. THREE.JS VOXEL ENGINE (Pre-allocated)
+        // ==========================================
+        let scene, camera, renderer, voxelInstancedMesh, coreGroup;
+        const dummy = new THREE.Object3D(); 
+        const colorTemp = new THREE.Color();
+        const MAX_VOXELS = 30000; // จองพื้นที่สูงสุดไว้เลย (ULTRA = 200x150 = 30000)
+
+        function initWebGL() {
+            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x010204, 0.03);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000); 
+            camera.position.set(0, 0, 10);
+            
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight); 
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+            const pLight = new THREE.PointLight(0x00f3ff, 2, 20); pLight.position.set(0, 5, 5); scene.add(pLight);
+            
+            // สร้าง InstancedMesh เปล่าๆ ขนาด 1x1x1 ไว้ 30,000 ก้อน
+            const geometry = new THREE.BoxGeometry(1, 1, 1);
+            const material = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.2, metalness: 0.1 });
+            
+            voxelInstancedMesh = new THREE.InstancedMesh(geometry, material, MAX_VOXELS);
+            voxelInstancedMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            voxelInstancedMesh.visible = false; 
+            scene.add(voxelInstancedMesh);
+
+            coreGroup = new THREE.Group(); scene.add(coreGroup);
+            coreGroup.add(new THREE.Mesh(new THREE.BoxGeometry(1.5,1.5,1.5), new THREE.MeshPhysicalMaterial({color: 0x111111, wireframe:true})));
+
+            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+            animate();
+        }
+
+        // ==========================================
+        // 4. DIVINE EYE STREAM
+        // ==========================================
+        const videoEl = document.getElementById('camera-feed');
+        const bufferCanvas = document.getElementById('pixel-buffer-canvas');
+        const ctx = bufferCanvas.getContext('2d', { willReadFrequently: true });
+        let streamTrack = null; let animationFrameId = null;
+
+        window.toggleDivineEye = async function() {
+            if (SexyCellOS.s.isStreaming) stopStream();
+            else await startStream();
+        }
+
+        async function startStream() {
+            if (streamTrack) streamTrack.stop(); // เคลียร์กล้องเก่าก่อน
+            
+            try {
+                const constraints = { video: { facingMode: SexyCellOS.s.currentCam, width: { ideal: 640 } }, audio: false };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoEl.srcObject = stream;
+                streamTrack = stream.getTracks()[0];
+                
+                await new Promise(resolve => videoEl.onloadedmetadata = resolve);
+                videoEl.play();
+                
+                // เตรียม Buffer Canvas ตามความละเอียดปัจจุบัน
+                const res = ResMatrix[SexyCellOS.s.resIdx];
+                bufferCanvas.width = res.w; bufferCanvas.height = res.h;
+
+                SexyCellOS.s.isStreaming = true;
+                coreGroup.visible = false; 
+                voxelInstancedMesh.visible = true; 
+                
+                writeLog("เชื่อมต่อกระแสจิตกล้องตาทิพย์สำเร็จ");
+                speakDharma("เปิดระบบตาทิพย์แล้วครับ");
+                renderCellDOM();
+                
+                processStreamBuffer(); 
+            } catch (err) {
+                writeLog(`[STREAM ERROR]: ${err.message}`, true);
+            }
+        }
+
+        function stopStream() {
+            if (streamTrack) streamTrack.stop();
+            if (animationFrameId) cancelAnimationFrame(animationFrameId);
+            videoEl.srcObject = null; SexyCellOS.s.isStreaming = false;
+            voxelInstancedMesh.visible = false; coreGroup.visible = true;
+            writeLog("ปิดกระแสจิตตาทิพย์"); speakDharma("ปิดระบบตาทิพย์ครับ");
+            renderCellDOM();
+        }
+
+        function processStreamBuffer() {
+            if (!SexyCellOS.s.isStreaming) return;
+            
+            const res = ResMatrix[SexyCellOS.s.resIdx];
+            ctx.drawImage(videoEl, 0, 0, res.w, res.h);
+            const imgData = ctx.getImageData(0, 0, res.w, res.h).data;
+            
+            const offsetX = (res.w * res.spacing) / 2;
+            const offsetY = (res.h * res.spacing) / 2;
+            const isFrontCam = (SexyCellOS.s.currentCam === 'user');
+
+            let instanceIdx = 0;
+
+            for (let y = 0; y < res.h; y++) {
+                for (let x = 0; x < res.w; x++) {
+                    const dataIdx = (y * res.w + x) * 4;
+                    const r = imgData[dataIdx];
+                    const g = imgData[dataIdx + 1];
+                    const b = imgData[dataIdx + 2];
+                    
+                    const brightness = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+                    const z = brightness * 3.5; 
+                    
+                    // กระจกเงาเฉพาะกล้องหน้า
+                    const targetX = isFrontCam ? (res.w - x - 1) : x; 
+
+                    dummy.position.set(
+                        (targetX * res.spacing) - offsetX, 
+                        -(y * res.spacing) + offsetY, 
+                        z
+                    );
+                    // ปรับขนาด Voxel ด้วย Scale
+                    dummy.scale.set(res.size, res.size, res.size);
+                    dummy.updateMatrix();
+                    
+                    voxelInstancedMesh.setMatrixAt(instanceIdx, dummy.matrix);
+                    colorTemp.setRGB(r/255, g/255, b/255);
+                    voxelInstancedMesh.setColorAt(instanceIdx, colorTemp);
+                    
+                    instanceIdx++;
+                }
+            }
+            
+            // ลิมิต Draw Call ให้ตรงกับ Resolution ปัจจุบัน (Zero GC)
+            voxelInstancedMesh.count = instanceIdx; 
+            voxelInstancedMesh.instanceMatrix.needsUpdate = true;
+            voxelInstancedMesh.instanceColor.needsUpdate = true;
+            
+            const time = Date.now() * 0.001;
+            voxelInstancedMesh.rotation.y = Math.sin(time * 0.5) * 0.3;
+            voxelInstancedMesh.rotation.x = Math.cos(time * 0.3) * 0.1;
+
+            animationFrameId = requestAnimationFrame(processStreamBuffer);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(coreGroup && coreGroup.visible) { coreGroup.rotation.y += 0.006; coreGroup.rotation.x += 0.002; }
+            renderer.render(scene, camera);
+        }
+
+        initWebGL(); renderCellDOM();
+    </script>
+</body>
+</html>
