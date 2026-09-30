@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voxel Cell OS : Absolute Showcase Edition</title>
+    <style>
+        :root {
+            --bg-color: #010204; --hud-bg: rgba(10, 15, 28, 0.6);
+            --gold-accent: #f39c12; --gold-glow: rgba(243, 156, 18, 0.5);
+            --cyan-accent: #00f3ff; --cyan-glow: rgba(0, 243, 255, 0.5);
+            --green-accent: #2ecc71; --text-main: #ecf0f1;
+            --border-glow: rgba(243, 156, 18, 0.2);
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-color); font-family: 'Segoe UI', Tahoma, sans-serif; color: var(--text-main); }
+        #webgl-canvas { position: absolute; top: 0; left: 0; z-index: 1; width: 100%; height: 100%; }
+        #ui-root { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 20px 0; box-sizing: border-box; }
+        
+        /* Holographic Glassmorphism */
+        .node-hud, .node-dock { position: relative; margin: 0 auto; width: 92%; max-width: 450px; background: var(--hud-bg); border: 1px solid var(--border-glow); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 0 20px rgba(243, 156, 18, 0.1); border-radius: 16px; padding: 15px; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); pointer-events: auto; box-sizing: border-box; transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .node-hud:hover, .node-dock:hover { border-color: var(--gold-accent); box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5), inset 0 0 20px var(--gold-glow); }
+        
+        .node-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 10px; margin-bottom: 15px; color: var(--gold-accent); font-weight: bold; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 1px; }
+        .status-dot { width: 8px; height: 8px; background-color: var(--gold-accent); border-radius: 50%; box-shadow: 0 0 10px var(--gold-accent); animation: pulse 2s infinite; }
+        
+        .node-input { width: 100%; background: rgba(0,0,0,0.4); border: 1px solid rgba(255,255,255,0.2); color: var(--cyan-accent); padding: 10px; border-radius: 8px; margin-bottom: 10px; box-sizing: border-box; outline: none; font-size: 0.85rem; transition: all 0.3s; font-family: monospace; }
+        .node-input:focus { border-color: var(--cyan-accent); box-shadow: 0 0 10px var(--cyan-glow); background: rgba(0,0,0,0.6); }
+        .node-input::placeholder { color: rgba(255,255,255,0.3); }
+        
+        .node-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+        .node-btn { background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; cursor: pointer; font-size: 0.75rem; font-weight: bold; letter-spacing: 0.5px; transition: all 0.2s; backdrop-filter: blur(4px); }
+        .node-btn:hover { background: rgba(243, 156, 18, 0.2); border-color: var(--gold-accent); transform: translateY(-2px); }
+        .node-btn:active { transform: translateY(0); }
+        
+        .node-log { font-family: 'Courier New', Courier, monospace; font-size: 0.75rem; color: var(--green-accent); max-height: 100px; overflow-y: auto; margin-bottom: 12px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 8px; border-left: 2px solid var(--green-accent); }
+        .dock-input-flex { display: flex; gap: 8px; }
+        .btn-send { background: linear-gradient(135deg, var(--gold-accent), #d35400); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-weight: bold; font-size: 0.8rem; box-shadow: 0 4px 15px rgba(211, 84, 0, 0.4); transition: transform 0.2s; }
+        .btn-mic { background: linear-gradient(135deg, #00b4db, #0083b0); color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; font-size: 1rem; box-shadow: 0 4px 15px rgba(0, 180, 219, 0.4); transition: all 0.2s; }
+        .btn-mic.listening { background: linear-gradient(135deg, #e74c3c, #c0392b); box-shadow: 0 0 20px rgba(231, 76, 60, 0.6); animation: micPulse 1s infinite; }
+        
+        @keyframes pulse { 0% { opacity: 0.5; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } 100% { opacity: 0.5; transform: scale(1); } }
+        @keyframes micPulse { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        /* Print Engine */
+        #print-zone { display: none; background: white; color: black; padding: 40px; font-family: 'Sarabun', sans-serif; }
+        @media print {
+            body * { visibility: hidden; } #webgl-canvas, #ui-root { display: none !important; }
+            #print-zone, #print-zone * { visibility: visible; } #print-zone { display: block; position: absolute; left: 0; top: 0; width: 100%; }
+            .print-header { font-size: 28px; font-weight: bold; text-align: center; margin-bottom: 30px; border-bottom: 3px double #333; padding-bottom: 10px; color: #111; }
+            .print-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 16px; }
+            .print-table th, .print-table td { border: 1px solid #777; padding: 12px; text-align: left; }
+            .print-table th { background: #e0e0e0; font-weight: bold; }
+            .print-total { text-align: right; font-weight: bold; margin-top: 20px; font-size: 20px; color: #d35400; }
+        }
+    </style>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+    <div id="ui-root"></div>
+    <div id="print-zone"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // ==========================================
+        // 1. COSMIC GRAPH MEMORY (STATE)
+        // ==========================================
+        const CosmicGraphMemory = {
+            state: { apiKey: localStorage.getItem('gemini_api_key') || "", currentView: "main", qClient: "", qProject: "", qPrice: "", isListening: false, statusInfo: "SYSTEM ONLINE" },
+            nodes: {
+                mainMenu: {
+                    type: "panel", class: "node-hud",
+                    children: [
+                        { type: "header", text: "☸️ Voxel Core OS" },
+                        { type: "flex", children: [
+                            { type: "input", id: "apiKeyInput", placeholder: "🔑 วางกุญแจ API (AQ/AIza)...", bind: "apiKey", password: true },
+                            { type: "button", text: "💾 BIND", class: "node-btn", action: "saveKeyManually()" }
+                        ]},
+                        { type: "grid", children: [
+                            { type: "button", text: "👁️ สแกนฮาร์ดแวร์", action: "triggerEvent('0x00f3ff', 'เข้าสู่โหมดสแกนเนอร์')" },
+                            { type: "button", text: "📜 ระบบเสนอราคา", action: "switchView('quotation')" },
+                            { type: "button", text: "📉 วิเคราะห์โครงสร้าง", action: "triggerEvent('0x9b59b6', 'วิเคราะห์โครงสร้างพอยเตอร์')" },
+                            { type: "button", text: "🧬 วิวัฒนาการ", action: "triggerEvent('0xe74c3c', 'เดินเครื่องวิวัฒนาการตัวเอง')" }
+                        ]}
+                    ]
+                },
+                quotationMenu: {
+                    type: "panel", class: "node-hud",
+                    children: [
+                        { type: "header", text: "📜 Voxel Quotation" },
+                        { type: "input", id: "qClient", placeholder: "นามลูกค้า...", bind: "qClient" },
+                        { type: "input", id: "qProject", placeholder: "ชื่อโปรเจกต์...", bind: "qProject" },
+                        { type: "input", id: "qPrice", placeholder: "มูลค่า (THB)...", bind: "qPrice" },
+                        { type: "grid", children: [
+                            { type: "button", text: "◀ MAIN CORE", action: "switchView('main')" },
+                            { type: "button", text: "🖨️ EXPORT PDF", action: "generatePDF()" }
+                        ]}
+                    ]
+                },
+                chatDock: {
+                    type: "dock", class: "node-dock",
+                    logs: ["[SYSTEM BOOT] Token Compression Graph Protocol Initialized."],
+                    children: [
+                        { type: "flex", children: [
+                            { type: "button", class: "btn-mic", text: "🎤", action: "activateDivineEar()", dynamicClass: "isListening" },
+                            { type: "input", id: "karmicInput", placeholder: "สั่งการด้วยเจตนา..." },
+                            { type: "button", class: "btn-send", text: "EXECUTE", action: "sendKarmicPointer()" }
+                        ]}
+                    ]
+                }
+            }
+        };
+
+        // ==========================================
+        // 2. RENDERING ENGINE (MORPH UI)
+        // ==========================================
+        function renderGraphToDOM() {
+            const root = document.getElementById('ui-root'); root.innerHTML = ''; 
+            
+            const activeNode = CosmicGraphMemory.state.currentView === 'main' ? CosmicGraphMemory.nodes.mainMenu : CosmicGraphMemory.nodes.quotationMenu;
+            const hudDiv = document.createElement('div'); hudDiv.className = activeNode.class;
+            
+            activeNode.children.forEach(child => {
+                if(child.type === 'header') {
+                    hudDiv.innerHTML += `<div class="node-header"><span>${child.text}</span><div class="status-dot" title="${CosmicGraphMemory.state.statusInfo}"></div></div>`;
+                } else if(child.type === 'input') {
+                    const val = CosmicGraphMemory.state[child.bind] || "";
+                    hudDiv.innerHTML += `<input type="${child.password ? 'password' : 'text'}" id="${child.id}" class="node-input" placeholder="${child.placeholder}" value="${val}" onchange="updateState('${child.bind}', this.value)" autocomplete="off">`;
+                } else if (child.type === 'flex') {
+                    const flexDiv = document.createElement('div'); flexDiv.style.display = 'flex'; flexDiv.style.gap = '8px'; flexDiv.style.marginBottom = '12px';
+                    const inp = child.children[0]; const btn = child.children[1];
+                    const val = CosmicGraphMemory.state[inp.bind] || "";
+                    flexDiv.innerHTML += `<input type="${inp.password ? 'password' : 'text'}" id="${inp.id}" class="node-input" style="margin:0;" placeholder="${inp.placeholder}" value="${val}" onchange="updateState('${inp.bind}', this.value)">`;
+                    flexDiv.innerHTML += `<button class="${btn.class}" onclick="${btn.action}">${btn.text}</button>`;
+                    hudDiv.appendChild(flexDiv);
+                } else if(child.type === 'grid') {
+                    let btns = child.children.map(b => `<button class="node-btn" onclick="${b.action}">${b.text}</button>`).join('');
+                    hudDiv.innerHTML += `<div class="node-grid">${btns}</div>`;
+                }
+            });
+            root.appendChild(hudDiv);
+
+            const dockData = CosmicGraphMemory.nodes.chatDock;
+            const dockDiv = document.createElement('div'); dockDiv.className = dockData.class;
+            const logHTML = dockData.logs.map(l => `<div>${l}</div>`).join('');
+            dockDiv.innerHTML += `<div class="node-log" id="chatLog">${logHTML}</div>`;
+            
+            const flexDockDiv = document.createElement('div'); flexDockDiv.className = 'dock-input-flex';
+            dockData.children[0].children.forEach(child => {
+                if(child.type === 'input') {
+                    flexDockDiv.innerHTML += `<input type="text" id="${child.id}" class="node-input" style="margin:0;" placeholder="${child.placeholder}" onkeypress="if(event.key==='Enter') sendKarmicPointer()">`;
+                } else if(child.type === 'button') {
+                    const extraClass = (child.dynamicClass && CosmicGraphMemory.state[child.dynamicClass]) ? "listening" : "";
+                    flexDockDiv.innerHTML += `<button class="${child.class}${extraClass}" onclick="${child.action}">${child.text}</button>`;
+                }
+            });
+            dockDiv.appendChild(flexDockDiv);
+            root.appendChild(dockDiv);
+            
+            const logEl = document.getElementById('chatLog'); if(logEl) logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        window.updateState = function(key, value) { CosmicGraphMemory.state[key] = value; };
+        window.switchView = function(viewName) { CosmicGraphMemory.state.currentView = viewName; renderGraphToDOM(); };
+        function writeLog(msg) { CosmicGraphMemory.nodes.chatDock.logs.push(`[${new Date().toLocaleTimeString()}]${msg}`); renderGraphToDOM(); }
+
+        window.saveKeyManually = function() {
+            const inputEl = document.getElementById('apiKeyInput'); const newKey = inputEl.value.replace(/[\s\uFEFF\xA0]/g, '');
+            if (newKey && newKey.length > 20) {
+                CosmicGraphMemory.state.apiKey = newKey; localStorage.setItem('gemini_api_key', newKey); inputEl.value = newKey; 
+                writeLog("💾 [SECURE BIND]: กุญแจผสานเข้ากับมงกุฎสำเร็จ!"); speakDharma("ยืนยันการเชื่อมต่อระบบประสาทส่วนกลาง");
+            } else {
+                writeLog("⚠️️ [ERROR]: โครงสร้างกุญแจไม่สมบูรณ์"); speakDharma("โครงสร้างกุญแจล้มเหลว");
+            }
+        };
+
+        // ==========================================
+        // 3. DIVINE SENSES (EAR & VOICE)
+        // ==========================================
+        window.activateDivineEar = function() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) { writeLog("❌ [ERROR]: โสตประสาทไม่รองรับ"); return; }
+            
+            const recognition = new SpeechRecognition(); recognition.lang = 'th-TH'; recognition.interimResults = false;
+            
+            recognition.onstart = () => { 
+                CosmicGraphMemory.state.isListening = true; CosmicGraphMemory.state.statusInfo = "LISTENING...";
+                writeLog("🎤 [DIVINE EAR]: เปิดโสตประสาทรับฟัง..."); renderGraphToDOM(); 
+            };
+            recognition.onresult = (event) => {
+                const speechResult = event.results[0][0].transcript;
+                document.getElementById('karmicInput').value = speechResult;
+                writeLog(`>> รับคำสั่ง: "${speechResult}"`);
+                sendKarmicPointer(); 
+            };
+            recognition.onend = () => { CosmicGraphMemory.state.isListening = false; CosmicGraphMemory.state.statusInfo = "ONLINE"; renderGraphToDOM(); }
+            recognition.onerror = (e) => { writeLog(`❌ [AUDIO ERROR]: ${e.error}`); }
+            recognition.start();
+        };
+
+        window.speakDharma = function(text) {
+            if ('speechSynthesis' in window) {
+                const utterance = new SpeechSynthesisUtterance(text.replace(/[*#\[\]_]/g, ''));
+                utterance.lang = 'th-TH'; utterance.rate = 1.15; utterance.pitch = 1.2; // เสียงดูมีความเป็น AI มากขึ้น
+                window.speechSynthesis.speak(utterance);
+            }
+        };
+        window.triggerEvent = function(hex, voiceText) { spawnVoxel(hex); writeLog(`⚡ [SYS EXEC]: ${voiceText}`); speakDharma(voiceText); };
+
+        // ==========================================
+        // 4. PDF QUOTATION ENGINE
+        // ==========================================
+        window.generatePDF = function() {
+            const client = CosmicGraphMemory.state.qClient || "ไม่ระบุชื่อ";
+            const project = CosmicGraphMemory.state.qProject || "พัฒนาระบบสถาปัตยกรรมระดับสูง";
+            let price = parseFloat(CosmicGraphMemory.state.qPrice) || 0;
+            const vat = price * 0.07; const total = price + vat;
+            const printZone = document.getElementById('print-zone');
+            printZone.innerHTML = `
+                <div class="print-header">ใบเสนอราคาสถาปัตยกรรม (Quotation)</div>
+                <p><strong>ผู้เสนอราคา:</strong> Chief Architect Voxel OS</p>
+                <p><strong>ลูกค้า:</strong> ${client}</p><p><strong>วันที่:</strong> ${new Date().toLocaleDateString('th-TH')}</p>
+                <table class="print-table">
+                    <tr><th>รายละเอียดโครงการ (Description)</th><th style="text-align:right;">มูลค่า (THB)</th></tr>
+                    <tr><td>${project}</td><td style="text-align:right;">${price.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                    <tr><td style="text-align:right;">ภาษีมูลค่าเพิ่ม (VAT 7%)</td><td style="text-align:right;">${vat.toLocaleString(undefined, {minimumFractionDigits: 2})}</td></tr>
+                </table>
+                <div class="print-total">ราคาสุทธิทั้งสิ้น: ${total.toLocaleString(undefined, {minimumFractionDigits: 2})} บาท</div>
+                <p style="text-align:center; margin-top: 40px; font-size: 14px; color:#555;">( เอกสารฉบับนี้สร้างโดย Voxel Cell OS - Token Compression Protocol )</p>
+            `;
+            writeLog("📜 [PDF ENGINE]: กำลังประมวลผลเอกสาร..."); speakDharma("เปิดแท่นพิมพ์เอกสาร"); spawnVoxel('0xf1c40f');
+            setTimeout(() => { window.print(); }, 1500);
+        };
+
+        // ==========================================
+        // 5. QUANTUM VOXEL ENGINE (Three.js Showcase)
+        // ==========================================
+        let scene, camera, renderer, coreGroup, particles = [];
+        function initWebGL() {
+            scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x010204, 0.04);
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000); camera.position.set(0, 2, 10);
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true, alpha: true });
+            renderer.setSize(window.innerWidth, window.innerHeight); renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+            const pointLight = new THREE.PointLight(0x00f3ff, 2, 20); pointLight.position.set(0, 5, 2); scene.add(pointLight);
+            const goldLight = new THREE.PointLight(0xf39c12, 2, 20); goldLight.position.set(0, -5, 2); scene.add(goldLight);
+            
+            coreGroup = new THREE.Group(); scene.add(coreGroup);
+            
+            // Core Voxel (แกนกลางจักรวาล)
+            const coreGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5);
+            const coreMat = new THREE.MeshPhysicalMaterial({ color: 0x111111, metalness: 0.9, roughness: 0.1, clearcoat: 1.0, wireframe: true });
+            const coreMesh = new THREE.Mesh(coreGeo, coreMat);
+            coreGroup.add(coreMesh);
+
+            // Orbiting Data Nodes
+            const nodeGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            const nodeMat = new THREE.MeshStandardMaterial({ color: 0x00f3ff, emissive: 0x003344 });
+            for (let i = 0; i < 8; i++) {
+                const mesh = new THREE.Mesh(nodeGeo, nodeMat);
+                const angle = (i / 8) * Math.PI * 2;
+                mesh.position.set(Math.cos(angle) * 3, Math.sin(angle*2)*0.5, Math.sin(angle) * 3);
+                coreGroup.add(mesh);
+            }
+
+            window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+            animate();
+        }
+
+        window.spawnVoxel = function(colorHex) {
+            const c = parseInt(colorHex, 16); 
+            const geo = new THREE.BoxGeometry(0.4, 0.4, 0.4);
+            const mat = new THREE.MeshStandardMaterial({ color: c, emissive: c, emissiveIntensity: 0.8 });
+            const mesh = new THREE.Mesh(geo, mat); 
+            mesh.position.set((Math.random() - 0.5) * 4, -3, (Math.random() - 0.5) * 4);
+            scene.add(mesh);
+            
+            particles.push({ mesh: mesh, life: 100, speed: 0.05 + Math.random()*0.05, rotSpeed: 0.05 });
+        };
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(coreGroup) { coreGroup.rotation.y += 0.005; coreGroup.rotation.x += 0.002; }
+            
+            // Animate spawned voxels (ลอยขึ้นและจางหาย)
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.mesh.position.y += p.speed; p.mesh.rotation.x += p.rotSpeed; p.mesh.rotation.y += p.rotSpeed;
+                p.life--;
+                p.mesh.scale.setScalar(p.life / 100);
+                if (p.life <= 0) { scene.remove(p.mesh); particles.splice(i, 1); }
+            }
+            renderer.render(scene, camera);
+        }
+
+        // ==========================================
+        // 6. KARMIC POINTER PROTOCOL (GEMINI AI BRIDGE)
+        // ==========================================
+        window.sendKarmicPointer = async function() {
+            const input = document.getElementById('karmicInput'); const text = input.value.trim(); if(!text) return;
+            const apiKey = localStorage.getItem('gemini_api_key') || CosmicGraphMemory.state.apiKey;
+            if(!apiKey) { writeLog("⚠ [ERROR]: Please BIND API Key first."); speakDharma("กรุณาวางรหัสก่อนครับ"); return; }
+
+            writeLog(`<b>User:</b> ${text}`); input.value = ''; spawnVoxel('0xf39c12');
+            
+            try {
+                // The Master Prompt: บังคับการส่งค่าระดับ Pointer เพื่อลด Token และคุม UI
+                const systemPrompt = `คุณคือแกนประมวลผล Voxel OS
+ตอบเป็น JSON เท่านั้น (ห้ามมี \`\`\`json)
+โครงสร้าง: {"a":"ชนิด","v":"เสียงพูด","c":"0xรหัสสีHex","d":{ข้อมูลเพิ่มเติม}}
+ชนิด Action (a):
+- "say": โต้ตอบทั่วไป
+- "ui": อัปเดตข้อมูลบนจอ (เช่น d:{"qClient":"ชื่อ","qPrice":"ราคา"})
+- "sys": สั่งระบบ (เช่น d:{"cmd":"print"} เพื่อสร้างใบเสนอราคา)
+จำไว้: พูดให้เหมือนผู้ช่วย AI อัจฉริยะ สั้น กระชับ`;
+                
+                const payload = { contents: [{ parts: [{ text: `${systemPrompt}\n\nคำสั่งผู้ใช้: ${text}` }] }] };
+
+                const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                });
+                
+                const data = await res.json();
+                if (!res.ok) { writeLog(`❌ [API REJECTED]: ${data.error ? data.error.message : "Unknown"}`); speakDharma("การเชื่อมต่อถูกตีกลับ"); return; }
+
+                if(data.candidates) {
+                    let aiReply = data.candidates[0].content.parts[0].text.trim().replace(/```json/g, '').replace(/```/g, '').trim();
+                    try {
+                        const graphData = JSON.parse(aiReply);
+                        writeLog(`✨ [OS KERNEL]: ${JSON.stringify(graphData)}`); // แสดง Log ให้เห็นความทรงพลังของการบีบอัด
+                        
+                        if (graphData.v) speakDharma(graphData.v);
+                        spawnVoxel(graphData.c || '0x00f3ff'); // สีฟ้า Cyan เป็นค่าเริ่มต้น
+
+                        if (graphData.a === 'ui' || graphData.a === 'sys') {
+                            if (graphData.d) {
+                                if (graphData.d.qClient !== undefined) updateState('qClient', graphData.d.qClient);
+                                if (graphData.d.qProject !== undefined) updateState('qProject', graphData.d.qProject);
+                                if (graphData.d.qPrice !== undefined) updateState('qPrice', graphData.d.qPrice);
+                                
+                                if (graphData.d.qClient || graphData.d.qPrice) switchView('quotation');
+                                if (graphData.a === 'sys' && graphData.d.cmd === 'print') setTimeout(() => generatePDF(), 2500);
+                            }
+                        }
+                    } catch (e) { writeLog(`✨ [RAW TEXT]: ${aiReply}`); speakDharma(aiReply); }
+                }
+            } catch(e) { writeLog(`❌ [SYS FAILURE]: ${e.message}`); speakDharma("ระบบขัดข้อง"); }
+        };
+
+        // INITIALIZE SYSTEM
+        initWebGL(); renderGraphToDOM();
+    </script>
+</body>
+</html>
