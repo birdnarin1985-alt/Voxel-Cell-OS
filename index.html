@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Voxel Cell OS : LiDAR XR Fusion</title>
+    <style>
+        :root {
+            --bg-color: #010204; 
+            --hud-bg: rgba(10, 15, 25, 0.4); 
+            --hud-border: rgba(0, 243, 255, 0.3);
+            --cyan-accent: #00f3ff; --cyan-glow: rgba(0, 243, 255, 0.6);
+            --gold-accent: #f39c12; --green-accent: #2ecc71; --text-main: #f8f9fa;
+        }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: var(--bg-color); font-family: 'Segoe UI', Tahoma, sans-serif; color: var(--text-main); user-select: none; -webkit-user-select: none; }
+        #webgl-canvas { position: absolute; top: 0; left: 0; z-index: 1; width: 100%; height: 100%; }
+        
+        /* DOM Overlay สำหรับ AR */
+        #ui-root { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 20px 10px; box-sizing: border-box; }
+        
+        .node-hud { 
+            position: relative; margin: 0 auto; width: 100%; max-width: 400px; 
+            background: var(--hud-bg); border: 1px solid var(--hud-border); 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5), inset 0 0 20px rgba(0,243,255,0.1); 
+            border-radius: 20px; padding: 15px; 
+            backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); 
+            pointer-events: auto; transition: all 0.3s;
+        }
+        
+        .node-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px; margin-bottom: 10px; color: var(--cyan-accent); font-weight: bold; font-size: 1.1rem; text-shadow: 0 0 10px var(--cyan-glow); }
+        .status-dot { width: 10px; height: 10px; background-color: var(--green-accent); border-radius: 50%; box-shadow: 0 0 10px var(--green-accent); animation: pulse 1.5s infinite; }
+        
+        .node-log { font-family: 'Courier New', monospace; font-size: 0.75rem; color: var(--gold-accent); max-height: 80px; overflow-y: auto; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 10px; border-left: 3px solid var(--gold-accent); pointer-events: auto;}
+        
+        /* ซ่อนปุ่ม AR เริ่มต้นของ Three.js แล้วใช้แบบ Custom */
+        #ARButton { display: none !important; }
+        .btn-ar { 
+            background: linear-gradient(135deg, #00f3ff, #0055ff); color: white; 
+            border: none; padding: 15px; border-radius: 15px; cursor: pointer; 
+            font-size: 1rem; font-weight: bold; box-shadow: 0 4px 20px rgba(0,85,255,0.5); 
+            width: 100%; text-transform: uppercase; margin-top: 10px; pointer-events: auto;
+        }
+        
+        @keyframes pulse { 0% { opacity: 0.4; transform: scale(1); } 50% { opacity: 1; transform: scale(1.5); } 100% { opacity: 0.4; transform: scale(1); } }
+    </style>
+    
+    <!-- ES Module Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.150.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.150.0/examples/jsm/"
+        }
+    }
+    </script>
+</head>
+<body>
+    <canvas id="webgl-canvas"></canvas>
+    <div id="ui-root">
+        <div class="node-hud">
+            <div class="node-header">
+                <span>👁️ Voxel LiDAR XR</span>
+                <div class="status-dot"></div>
+            </div>
+            <div class="node-log" id="sys-log">
+                [SYSTEM]: รอการเชื่อมต่อ WebXR...<br>
+                [GUIDE]: กดปุ่มด้านล่างเพื่อเริ่มสแกนพื้นผิว
+            </div>
+            <button class="btn-ar" id="custom-ar-btn">เชื่อมต่อมิติ (ENTER AR)</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+
+        let container;
+        let camera, scene, renderer;
+        let controller, reticle;
+        
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+
+        // Voxel & Physics State
+        const voxels = [];
+        const gravity = -9.8;
+        let lastTime = 0;
+
+        init();
+        animate();
+
+        function writeLog(msg) {
+            const logEl = document.getElementById('sys-log');
+            logEl.innerHTML += `<br>> ${msg}`;
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function init() {
+            scene = new THREE.Scene();
+
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            light.position.set(0.5, 1, 0.25);
+            scene.add(light);
+
+            const pLight = new THREE.PointLight(0x00f3ff, 2, 10);
+            scene.add(pLight);
+
+            // 1. Renderer Setup (รองรับ WebXR)
+            renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('webgl-canvas'), antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.xr.enabled = true;
+
+            // 2. ซ่อนปุ่มเดิม และใช้ปุ่ม Custom สั่งงาน ARButton
+            const overlay = document.getElementById('ui-root');
+            const arButton = ARButton.createButton(renderer, { 
+                requiredFeatures: ['hit-test'], 
+                optionalFeatures: ['dom-overlay'], 
+                domOverlay: { root: overlay } 
+            });
+            document.body.appendChild(arButton);
+            
+            document.getElementById('custom-ar-btn').addEventListener('click', () => {
+                arButton.click();
+                document.getElementById('custom-ar-btn').style.display = 'none';
+                writeLog("ขยับกล้องช้าๆ เพื่อสแกนพื้นผิวจริง");
+            });
+
+            // 3. Controller สำหรับตรวจจับการแตะหน้าจอ (Tap)
+            controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
+            scene.add(controller);
+
+            // 4. Reticle (เป้าเล็งที่แนบไปกับพื้นผิวโลกจริง)
+            const ringGeo = new THREE.RingGeometry(0.04, 0.05, 32).rotateX(- Math.PI / 2);
+            const ringMat = new THREE.MeshBasicMaterial({ color: 0x00f3ff });
+            reticle = new THREE.Mesh(ringGeo, ringMat);
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        // ==========================================
+        // 5. GIMMICKS: Predator Aura & Karmic Collision
+        // ==========================================
+        function onSelect() {
+            if (reticle.visible) {
+                // ระยะห่างจากกล้องถึงเป้า (LiDAR Estimation)
+                const distance = camera.position.distanceTo(reticle.position);
+                
+                // PREDATOR AURA: คำนวณสีตามระยะทาง
+                // ใกล้สุด (~0m) = แดง (0xff0000)
+                // กลาง (~1.5m) = เขียว/เหลือง
+                // ไกล (>3m) = น้ำเงิน/ฟ้า (0x0000ff)
+                const hue = Math.min(distance / 4.0, 1.0) * 0.7; // 0 (Red) to ~0.7 (Blue)
+                const color = new THREE.Color().setHSL(hue, 1.0, 0.5);
+                
+                const voxelGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);
+                const voxelMat = new THREE.MeshStandardMaterial({ 
+                    color: color, 
+                    roughness: 0.1, 
+                    metalness: 0.8,
+                    emissive: color,
+                    emissiveIntensity: 0.4
+                });
+
+                const voxel = new THREE.Mesh(voxelGeo, voxelMat);
+                
+                // ให้ Voxel เกิดสูงกว่าพื้นเล็กน้อยเพื่อให้ตกลงมา
+                reticle.matrix.decompose(voxel.position, voxel.quaternion, voxel.scale);
+                voxel.position.y += 0.5; // เกิดสูงขึ้น 50cm
+                
+                // เก็บค่าฟิสิกส์ (Karmic Physics)
+                voxel.userData = {
+                    velocity: new THREE.Vector3((Math.random()-0.5)*0.5, 0, (Math.random()-0.5)*0.5),
+                    floorY: reticle.position.y, // จำระดับพื้นผิวโลกจริงที่สแกนเจอ
+                    bounces: 0
+                };
+
+                scene.add(voxel);
+                voxels.push(voxel);
+                
+                writeLog(`ยิง Voxel ระยะ: ${distance.toFixed(2)}m`);
+            }
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // ==========================================
+        // 6. XR RENDER LOOP & PHYSICS UPDATE
+        // ==========================================
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        function render(timestamp, frame) {
+            const dt = (timestamp - lastTime) * 0.001;
+            lastTime = timestamp;
+
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                // Hit Testing Logic (หาพื้นผิวจริง)
+                if (hitTestSourceRequested === false) {
+                    session.requestReferenceSpace('viewer').then(function (referenceSpace) {
+                        session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+                            hitTestSource = source;
+                        });
+                    });
+                    session.addEventListener('end', function () {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+                        document.getElementById('custom-ar-btn').style.display = 'block';
+                    });
+                    hitTestSourceRequested = true;
+                }
+
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+                    if (hitTestResults.length > 0) {
+                        const hit = hitTestResults[0];
+                        const pose = hit.getPose(referenceSpace);
+                        
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(pose.transform.matrix);
+                    } else {
+                        reticle.visible = false;
+                    }
+                }
+            }
+
+            // KARMIC COLLISION (ระบบฟิสิกส์ตกกระทบโลกจริง)
+            if (dt < 0.1) { // ป้องกัน dt กระโดดตอนค้าง
+                for (let i = 0; i < voxels.length; i++) {
+                    const v = voxels[i];
+                    if (v.userData.bounces < 5) {
+                        // Apply Gravity
+                        v.userData.velocity.y += gravity * dt;
+                        
+                        // Apply Velocity
+                        v.position.x += v.userData.velocity.x * dt;
+                        v.position.y += v.userData.velocity.y * dt;
+                        v.position.z += v.userData.velocity.z * dt;
+                        
+                        // หมุนกลิ้ง
+                        v.rotation.x += v.userData.velocity.y * dt * 2;
+                        v.rotation.y += v.userData.velocity.x * dt * 2;
+
+                        // ตรวจจับการชนพื้นจริง (Floor Collision)
+                        if (v.position.y <= v.userData.floorY + 0.03) { // 0.03 คือรัศมีครึ่งนึงของ Voxel
+                            v.position.y = v.userData.floorY + 0.03;
+                            
+                            // เด้งดึ๋ง (Bounce) สะท้อนแรงกลับ + ลดแรง
+                            v.userData.velocity.y = Math.abs(v.userData.velocity.y) * 0.6; 
+                            v.userData.velocity.x *= 0.8; // แรงเสียดทาน
+                            v.userData.velocity.z *= 0.8;
+                            
+                            v.userData.bounces++;
+                        }
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
